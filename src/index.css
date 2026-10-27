@@ -1,0 +1,23 @@
+@import 'tailwindcss';
+
+/* Strict SCADA palette. Exposed as utilities: bg-scada-bg, bg-scada-panel. */
+@theme {
+  --color-scada-bg: #121212;
+  --color-scada-panel: #1e1e1e;
+
+  /* 4-column layout. Must stay in rem like the built-in breakpoints: Tailwind
+     cannot order px against rem media queries, which silently breaks overrides. */
+  --breakpoint-wide: 87.5rem;
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-scada-bg);
+    color: var(--color-zinc-100);
+  }
+}

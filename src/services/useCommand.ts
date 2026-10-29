@@ -36,8 +36,13 @@ export const UNKNOWN_STATE = 'UNKNOWN'
  * from the PRD. `stop_cutterhead`, `deflate_bladder` and `interlock_override`
  * are the symmetric / implied counterparts: the PRD does not name them, so
  * confirm them against the backend contract here and only here.
+ *
+ * `reset_estop` is the backend's mandatory first step of the Safe Restart when
+ * the machine is `E-STOPPED`: the backend rejects `power_on` in that state, so
+ * the sequence is `reset_estop` -> `power_on` -> `arm`.
  */
 export const COMMANDS = {
+  RESET_ESTOP: 'reset_estop',
   POWER_ON: 'power_on',
   ARM: 'arm',
   SET_STATE: 'set_state',
@@ -52,9 +57,12 @@ export const COMMANDS = {
 // Public types (PRD 2.1)
 // ---------------------------------------------------------------------------
 
+/** Union of every identifier in `COMMANDS` (e.g. `'reset_estop' | 'power_on' | ...`). */
+export type CommandName = (typeof COMMANDS)[keyof typeof COMMANDS]
+
 export interface CommandPayload {
-  /** e.g. "power_on", "arm", "start_cutterhead", "inflate_bladder". */
-  command: string
+  /** Only identifiers declared in `COMMANDS` compile. */
+  command: CommandName
   /** e.g. `{ target: "READY" }` for `set_state`. */
   params?: Record<string, unknown>
 }
@@ -93,6 +101,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/** `command` stays `string` here: it may be the e-stop id or echoed by the server. */
 function failure(command: string, message: string): CommandResponse {
   return { ok: false, message, command, state: UNKNOWN_STATE }
 }

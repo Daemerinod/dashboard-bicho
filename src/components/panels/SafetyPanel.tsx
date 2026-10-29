@@ -144,9 +144,9 @@ export function SafetyPanel({ telemetry, stale }: SafetyPanelProps) {
               {NO_VALUE}
             </p>
           ) : pendingActions.length === 0 ? (
-            <p className="border border-emerald-500 px-3 py-2 font-mono text-sm font-bold uppercase text-emerald-500">
-              No pending actions
-            </p>
+            <StatusTag severity="ok" size="lg">
+              NO PENDING ACTIONS
+            </StatusTag>
           ) : (
             <ol className="flex flex-col gap-1.5">
               {pendingActions.map((action, index) => (
@@ -164,8 +164,8 @@ export function SafetyPanel({ telemetry, stale }: SafetyPanelProps) {
             <p className="mt-1.5 text-xs uppercase tracking-wider text-zinc-400">
               Completed{' '}
               <span className="font-mono text-zinc-100">
-                {safety.safe_restart.completed.length}/
-                {safety.safe_restart.sequence.length}
+                {safety.safe_restart.completed?.length ?? 0}/
+                {safety.safe_restart.sequence?.length ?? 0}
               </span>
             </p>
           )}

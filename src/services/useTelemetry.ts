@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { TBMTelemetry } from '../domain/telemetry'
-import { isTBMTelemetry } from '../domain/telemetryGuard'
+import { getTelemetryIssues } from '../domain/telemetryGuard'
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -85,8 +85,46 @@ async function fetchTelemetry(signal: AbortSignal): Promise<TBMTelemetry> {
   if (!response.ok) throw new Error(`HTTP ${response.status}`)
 
   const payload: unknown = await response.json()
-  if (!isTBMTelemetry(payload)) throw new Error('INVALID PAYLOAD')
-  return payload
+  const issues = getTelemetryIssues(payload)
+  if (issues.length > 0) {
+    reportInvalidPayload(payload, issues)
+    throw new Error(`INVALID PAYLOAD: ${issues[0]}`)
+  }
+  lastReportedIssues = null
+
+  // Defensive normalization: the backend omits (or nulls) the re-arm lists
+  // when no restart is in progress (e.g. IDLE). Guarantee arrays for the UI.
+  const telemetry = payload as TBMTelemetry
+  if (telemetry.extra?.safety?.safe_restart) {
+    telemetry.extra.safety.safe_restart.sequence ??= []
+    telemetry.extra.safety.safe_restart.completed ??= []
+    telemetry.extra.safety.safe_restart.pending ??= []
+  }
+  return telemetry
+}
+
+/**
+ * Signature of the last violation set that was logged. While the backend keeps
+ * returning the same invalid shape (retry every second) the console is not
+ * flooded: it logs again only when the set of violations changes.
+ */
+let lastReportedIssues: string | null = null
+
+/** Makes a silently rejected payload visible in the browser console. */
+function reportInvalidPayload(payload: unknown, issues: readonly string[]) {
+  const signature = issues.join('\n')
+  if (signature === lastReportedIssues) return
+  lastReportedIssues = signature
+
+  const state =
+    typeof payload === 'object' && payload !== null && 'extra' in payload
+      ? (payload as { extra?: { state?: unknown } }).extra?.state
+      : undefined
+  console.error(
+    `Validation failed at payload (state: ${String(state ?? 'unknown')}):`,
+    payload,
+    `\n${issues.length} issue(s):\n - ${issues.join('\n - ')}`,
+  )
 }
 
 function describeError(error: unknown): string {

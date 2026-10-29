@@ -148,11 +148,15 @@ export type InterlockId = keyof Interlocks
 export interface SafeRestart {
   required: boolean
   independent_actions_required: number
+  /**
+   * `sequence`, `completed` and `pending` are omitted by the backend when
+   * there is no re-arm in progress, e.g. in the IDLE state.
+   */
   /** Ordered restart actions, e.g. ["power_on", "arm"]. */
-  sequence: string[]
-  completed: string[]
+  sequence?: string[]
+  completed?: string[]
   /** Actions still missing to re-arm the machine. */
-  pending: string[]
+  pending?: string[]
 }
 
 export interface Safety {

@@ -120,8 +120,6 @@ function CommandButton({
 export function ActionDeck({ telemetry, stale }: ActionDeckProps) {
   const { isPending, sendCommand, sendEmergencyStop } = useCommand()
   const [alert, setAlert] = useState<DeckAlert | null>(null)
-  /** A POWER ON was accepted by the server since the machine got locked. */
-  const [powerOnAcked, setPowerOnAcked] = useState(false)
   const [confirmingOverride, setConfirmingOverride] = useState(false)
 
   const state = telemetry?.extra.state
@@ -130,29 +128,26 @@ export function ActionDeck({ telemetry, stale }: ActionDeckProps) {
 
   // --- Enabling logic -------------------------------------------------------
 
+  const estopped = state === 'E-STOPPED'
   /** Safe Restart rule: only the restart sequence is allowed in these states. */
-  const restartLocked = state === 'E-STOPPED' || state === 'POWER OFF'
+  const restartLocked = estopped || state === 'POWER OFF'
   /** No telemetry, or telemetry that is no longer current: state unknown. */
   const telemetryTrusted = telemetry !== null && !stale
   const canSend = telemetryTrusted && !isPending
   const operationsEnabled = canSend && !restartLocked
-  /** The machine itself is asking for the second step of the restart. */
-  const machineAsksForArm =
-    pendingRestart !== undefined &&
-    pendingRestart.includes('arm') &&
-    !pendingRestart.includes('power_on')
-  const powerOnDone = powerOnAcked || machineAsksForArm
-  const powerOnEnabled = canSend
-  const armEnabled = canSend && (!restartLocked || powerOnDone)
 
-  // Adjusting state while rendering (React-documented pattern; no effect, no
-  // extra frame): a new lock invalidates any earlier POWER ON, so ARM can never
-  // be armed by an acknowledgement from a previous restart cycle.
-  const [wasLocked, setWasLocked] = useState(restartLocked)
-  if (wasLocked !== restartLocked) {
-    setWasLocked(restartLocked)
-    if (restartLocked) setPowerOnAcked(false)
-  }
+  // Safe Restart buttons are driven STRICTLY by the backend's `pending` list:
+  // the head of the list is the only step the machine accepts right now. No
+  // local state (E-STOPPED, acknowledged commands...) can enable or block them,
+  // so the UI can never disagree with the backend about the sequence.
+  const nextRestartStep: string | undefined = pendingRestart?.[0]
+  const firstIsResetEstop = nextRestartStep === COMMANDS.RESET_ESTOP
+  /** First button: RESET ESTOP or POWER ON, whichever the backend asks for. */
+  const firstStepEnabled =
+    canSend && (firstIsResetEstop || nextRestartStep === COMMANDS.POWER_ON)
+  /** ARM: enabled exactly when it is the head of the pending list. */
+  const armEnabled = canSend && nextRestartStep === COMMANDS.ARM
+
   // The override confirmation must not survive the button being locked.
   if (confirmingOverride && !operationsEnabled) setConfirmingOverride(false)
 
@@ -175,16 +170,19 @@ export function ActionDeck({ telemetry, stale }: ActionDeckProps) {
     return response
   }
 
-  const handlePowerOn = async () => {
-    const response = await execute({ command: COMMANDS.POWER_ON })
-    if (response.ok) setPowerOnAcked(true)
+  const handleResetEstop = () => {
+    void execute({ command: COMMANDS.RESET_ESTOP })
+  }
+
+  const handlePowerOn = () => {
+    void execute({ command: COMMANDS.POWER_ON })
   }
 
   const handleArm = () => {
     void execute({ command: COMMANDS.ARM })
   }
 
-  const handleSetState = (target: 'READY' | 'MINING') => {
+  const handleSetState = (target: 'IDLE' | 'READY' | 'MINING') => {
     void execute({ command: COMMANDS.SET_STATE, params: { target } })
   }
 
@@ -198,9 +196,6 @@ export function ActionDeck({ telemetry, stale }: ActionDeckProps) {
   }
 
   const handleEmergencyStop = async () => {
-    // A new e-stop invalidates the restart progress, even before the
-    // telemetry reflects the E-STOPPED state.
-    setPowerOnAcked(false)
     setConfirmingOverride(false)
     const response = await sendEmergencyStop()
     if (!response.ok) {
@@ -230,7 +225,12 @@ export function ActionDeck({ telemetry, stale }: ActionDeckProps) {
     statusText = 'Sending command...'
     statusClass = 'border-zinc-500 text-zinc-100'
   } else if (restartLocked) {
-    statusText = `${state}: operations locked. Complete safe restart (1 POWER ON, 2 ARM)`
+    statusText =
+      pendingRestart !== undefined && pendingRestart.length > 0
+        ? `${state}: operations locked. Complete safe restart (${pendingRestart
+            .map((step, index) => `${index + 1} ${humanize(step)}`)
+            .join(', ')})`
+        : `${state}: operations locked. Waiting for the backend restart sequence`
     statusClass = 'border-amber-500 text-amber-500'
   }
 
@@ -276,10 +276,10 @@ export function ActionDeck({ telemetry, stale }: ActionDeckProps) {
             <h3 className={SECTION_TITLE}>1 · Safe restart</h3>
             <div className="grid grid-cols-2 gap-2">
               <CommandButton
-                label="Power on"
+                label={firstIsResetEstop ? 'Reset estop' : 'Power on'}
                 tone="start"
-                disabled={!powerOnEnabled}
-                onClick={() => void handlePowerOn()}
+                disabled={!firstStepEnabled}
+                onClick={firstIsResetEstop ? handleResetEstop : handlePowerOn}
               />
               <CommandButton
                 label="Arm"
@@ -290,7 +290,9 @@ export function ActionDeck({ telemetry, stale }: ActionDeckProps) {
             </div>
             {restartLocked && (
               <p className="mt-1.5 font-mono text-xs uppercase tracking-wider text-amber-500">
-                {powerOnDone ? 'Step 2/2: press ARM' : 'Step 1/2: press POWER ON'}
+                {nextRestartStep !== undefined
+                  ? `Next step: press ${humanize(nextRestartStep)}`
+                  : 'Waiting for the backend restart sequence'}
               </p>
             )}
           </section>
@@ -299,6 +301,12 @@ export function ActionDeck({ telemetry, stale }: ActionDeckProps) {
           <section aria-label="State transitions">
             <h3 className={SECTION_TITLE}>2 · State machine</h3>
             <div className="grid grid-cols-2 gap-2">
+              <CommandButton
+                label="Set idle"
+                tone="neutral"
+                disabled={!operationsEnabled}
+                onClick={() => handleSetState('IDLE')}
+              />
               <CommandButton
                 label="Set ready"
                 tone="neutral"
